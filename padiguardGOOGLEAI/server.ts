@@ -10,7 +10,8 @@ import fs from "fs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Initialize Database
-const db = new Database("padiguard.db");
+const dbPath = process.env.DB_PATH || "padiguard.db";
+const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
 
 // Initialize Tables
@@ -45,7 +46,7 @@ try {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT || 3000;
 
   app.use(express.json({ limit: "10mb" }));
 
