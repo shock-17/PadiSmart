@@ -1,0 +1,5 @@
+{
+  "name": "PadiGuard",
+  "description": "Smart paddy monitoring app with disease detection, AWD irrigation alerts, and community planting synchronization.",
+  "requestFramePermissions": ["camera", "geolocation"]
+}
