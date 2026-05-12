@@ -132,9 +132,10 @@ const DetectionFeature = () => {
     try {
       const response = await axios.post('/api/analyze', { image: base64Image });
       setResult(response.data);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      alert('Gagal menganalisis gambar. Pastikan koneksi internet stabil.');
+      const backendError = error.response?.data?.error;
+      alert(backendError ? `Error: ${backendError}` : 'Gagal menganalisis gambar. Pastikan koneksi internet stabil.');
     } finally {
       setAnalyzing(false);
     }
