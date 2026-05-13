@@ -1,7 +1,7 @@
 # PadiSmart
 
 ## What is PadiSmart?
-**PadiSmart** (formerly PadiGuard) is an integrated, mobile-responsive agricultural web application designed specifically to empower paddy farmers (*Petani Padi*) and farming communities (*Kelompok Tani*) in Indonesia. It bridges the gap between traditional farming and modern technology by providing a suite of smart tools—ranging from AI-powered disease detection to community resource scheduling—accessible right from a smartphone browser.
+**PadiSmart** is an integrated, mobile-responsive agricultural web application designed specifically to empower paddy farmers (*Petani Padi*) and farming communities (*Kelompok Tani*) in Indonesia. It bridges the gap between traditional farming and modern technology by providing a suite of smart tools—ranging from AI-powered disease detection to community resource scheduling—accessible right from a smartphone browser.
 
 ## The Purpose & Goal
 The primary goal of PadiSmart is to **increase agricultural yields and economic stability** for farmers by solving three major root problems:
