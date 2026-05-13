@@ -9,8 +9,6 @@
 3. **Peta Lahan (Interactive Mapping)**: Uses Leaflet and OpenStreetMap to plot coordinates of community paddy fields. Shows interactive markers that display ownership, crop variety, area size, and estimated harvest dates on click.
 4. **Community Sync**: 
    * **Jadwal Tanam (Planting Schedule)**: A collaborative dashboard to log planting dates, auto-calculate harvest estimates (+115 days), and pick exact land locations via an interactive map picker.
-   * **Booking Alat (Resource Rental)**: Digitize the booking of shared equipment. Farmers can select between 'Combine Harvester' or 'Lantai Jemur' via a dropdown menu.
-   * **Cancel Booking**: Farmers can easily cancel their resource bookings using the Trash icon, which immediately updates the community list.
 
 ## 3. Technology Stack
 * **Frontend**: React 19, TypeScript, Vite, Tailwind CSS, Recharts (for charts), React-Leaflet (for mapping), Framer Motion (for animations), `react-webcam`.
@@ -21,7 +19,6 @@
 ## 4. Database Schema
 Powered by `better-sqlite3` operating in WAL (Write-Ahead Logging) mode.
 * **schedules** table: `id`, `farmerName`, `variety`, `plantingDate`, `harvestDate`, `areaSize`, `lat` (latitude), `lng` (longitude).
-* **bookings** table: `id`, `resourceType` ('harvester' or 'drying_floor'), `farmerName`, `date`, `status`.
 
 ## 5. Environment Setup
 To run this application locally or in production, you must set up the `.env` file based on `.env.example`.
