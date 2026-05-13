@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, useEffect, FormEvent, Fragment } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Camera, 
@@ -21,7 +21,7 @@ import Webcam from 'react-webcam';
 import axios from 'axios';
 import { format, addDays, parseISO, differenceInDays } from 'date-fns';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents, Polygon, CircleMarker } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -64,6 +64,16 @@ interface Schedule {
   areaSize: number;
   lat?: number;
   lng?: number;
+  polygon?: string;
+}
+
+interface DiseaseReport {
+  id: number;
+  farmerName: string;
+  diseaseName: string;
+  lat: number;
+  lng: number;
+  date: string;
 }
 
 // --- Components ---
@@ -108,6 +118,9 @@ const DetectionFeature = () => {
   const [analyzing, setAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
+  
+  const [farmerName, setFarmerName] = useState('');
+  const [reporting, setReporting] = useState(false);
 
   const capture = (getScreenshot: () => string | null) => {
     const image = getScreenshot();
@@ -131,6 +144,40 @@ const DetectionFeature = () => {
     } finally {
       setAnalyzing(false);
     }
+  };
+
+  const handleReport = async () => {
+    if (!farmerName) return;
+    setReporting(true);
+    if (!navigator.geolocation) {
+       alert('Geolocation tidak didukung oleh browser Anda');
+       setReporting(false);
+       return;
+    }
+    
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          await axios.post('/api/reports', {
+            farmerName,
+            diseaseName: result?.condition,
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            date: new Date().toISOString()
+          });
+          alert('Berhasil melaporkan ke peta!');
+          setFarmerName('');
+        } catch(e) {
+          alert('Gagal melaporkan');
+        } finally {
+          setReporting(false);
+        }
+      },
+      () => {
+        alert('Gagal mendapatkan lokasi. Pastikan izin lokasi aktif.');
+        setReporting(false);
+      }
+    );
   };
 
   return (
@@ -243,6 +290,29 @@ const DetectionFeature = () => {
             <h3 className="text-sm font-semibold text-emerald-800 mb-1">Saran Penanganan</h3>
             <p className="text-emerald-700 text-sm leading-relaxed">{result.treatment}</p>
           </div>
+
+          {result.condition !== 'Healthy' && (
+            <div className="border-t border-stone-100 pt-4 mt-4">
+              <h3 className="text-sm font-semibold text-stone-700 mb-2">Laporkan Temuan di Peta</h3>
+              <div className="flex gap-2">
+                <input 
+                  type="text" 
+                  placeholder="Nama Anda" 
+                  className="flex-1 p-2 border border-stone-200 rounded-lg text-sm"
+                  value={farmerName}
+                  onChange={e => setFarmerName(e.target.value)}
+                />
+                <button 
+                  onClick={handleReport}
+                  disabled={!farmerName || reporting}
+                  className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+                >
+                  {reporting ? 'Melapor...' : 'Laporkan'}
+                </button>
+              </div>
+              <p className="text-xs text-stone-500 mt-2">Agar petani lain dapat mewaspadai penyebaran penyakit ini.</p>
+            </div>
+          )}
         </motion.div>
       )}
     </div>
@@ -368,9 +438,11 @@ const IrrigationFeature = () => {
 
 const MapFeature = () => {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [reports, setReports] = useState<DiseaseReport[]>([]);
 
   useEffect(() => {
     axios.get('/api/schedules').then(res => setSchedules(res.data)).catch(console.error);
+    axios.get('/api/reports').then(res => setReports(res.data)).catch(console.error);
   }, []);
 
   return (
@@ -389,31 +461,79 @@ const MapFeature = () => {
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        {schedules.map((s) => s.lat && s.lng && (
-          <Marker key={s.id} position={[s.lat, s.lng]}>
-            <Popup>
-              <div className="p-1">
-                <h3 className="font-bold text-base mb-1">{s.farmerName}</h3>
-                <div className="text-sm text-stone-600 mb-2">{s.variety} • {s.areaSize} Ha</div>
-                <div className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-xs font-medium">
-                  Panen: {format(parseISO(s.harvestDate), 'dd MMM yyyy')}
-                </div>
-              </div>
-            </Popup>
-          </Marker>
+        {schedules.map((s) => {
+          let poly: [number, number][] | undefined = undefined;
+          try {
+            if (s.polygon && s.polygon.length > 5) {
+               poly = JSON.parse(s.polygon);
+            }
+          } catch(e){}
+
+          return (
+            <Fragment key={`sched-${s.id}`}>
+              {poly && poly.length > 0 ? (
+                <Polygon positions={poly} color="#10b981" fillColor="#10b981" fillOpacity={0.4}>
+                  <Popup>
+                    <div className="p-1">
+                      <h3 className="font-bold text-base mb-1">{s.farmerName}</h3>
+                      <div className="text-sm text-stone-600 mb-2">{s.variety} • {s.areaSize} Ha</div>
+                      <div className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-xs font-medium">
+                        Panen: {format(parseISO(s.harvestDate), 'dd MMM yyyy')}
+                      </div>
+                    </div>
+                  </Popup>
+                </Polygon>
+              ) : (
+                s.lat && s.lng && (
+                  <Marker position={[s.lat, s.lng]}>
+                    <Popup>
+                      <div className="p-1">
+                        <h3 className="font-bold text-base mb-1">{s.farmerName}</h3>
+                        <div className="text-sm text-stone-600 mb-2">{s.variety} • {s.areaSize} Ha</div>
+                        <div className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-xs font-medium">
+                          Panen: {format(parseISO(s.harvestDate), 'dd MMM yyyy')}
+                        </div>
+                      </div>
+                    </Popup>
+                  </Marker>
+                )
+              )}
+            </Fragment>
+          );
+        })}
+
+        {reports.map(r => (
+           <CircleMarker key={`rep-${r.id}`} center={[r.lat, r.lng]} radius={10} color="#ef4444" fillColor="#ef4444" fillOpacity={0.7}>
+              <Popup>
+                 <div className="p-1">
+                   <h3 className="font-bold text-red-600 mb-1">{r.diseaseName}</h3>
+                   <div className="text-sm text-stone-600">Pelapor: {r.farmerName}</div>
+                   <div className="text-xs text-stone-400 mt-1">{format(parseISO(r.date), 'dd MMM yyyy')}</div>
+                 </div>
+              </Popup>
+           </CircleMarker>
         ))}
       </MapContainer>
     </div>
   );
 };
 
-const LocationPicker = ({ position, setPosition }: { position: [number, number], setPosition: (pos: [number, number]) => void }) => {
+const LocationPicker = ({ formData, setFormData }: any) => {
   useMapEvents({
     click(e) {
-      setPosition([e.latlng.lat, e.latlng.lng]);
+      if (formData.drawingPolygon) {
+        setFormData({ ...formData, polygon: [...formData.polygon, [e.latlng.lat, e.latlng.lng]] });
+      } else {
+        setFormData({ ...formData, lat: e.latlng.lat, lng: e.latlng.lng });
+      }
     },
   });
-  return position ? <Marker position={position} /> : null;
+  return (
+    <>
+      {!formData.drawingPolygon && formData.lat && <Marker position={[formData.lat, formData.lng]} />}
+      {formData.drawingPolygon && formData.polygon.length > 0 && <Polygon positions={formData.polygon} color="#10b981" />}
+    </>
+  );
 };
 
 const CommunityFeature = () => {
@@ -427,7 +547,9 @@ const CommunityFeature = () => {
     plantingDate: format(new Date(), 'yyyy-MM-dd'),
     areaSize: 1,
     lat: -6.2088,
-    lng: 106.8456
+    lng: 106.8456,
+    polygon: [] as [number, number][],
+    drawingPolygon: false
   });
 
   const fetchData = async () => {
@@ -547,19 +669,33 @@ const CommunityFeature = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-stone-700 mb-1 flex items-center gap-2">
-                    <MapPin size={16} /> Lokasi Lahan
+                  <label className="block text-sm font-medium text-stone-700 mb-1 flex items-center justify-between">
+                    <span className="flex items-center gap-2"><MapPin size={16} /> Lokasi Lahan</span>
+                    <button 
+                      type="button" 
+                      onClick={() => setFormData({...formData, drawingPolygon: !formData.drawingPolygon, polygon: []})}
+                      className="text-xs text-indigo-600 font-medium"
+                    >
+                      {formData.drawingPolygon ? 'Ubah ke Titik' : 'Gambar Area (Polygon)'}
+                    </button>
                   </label>
                   <div className="h-40 rounded-lg overflow-hidden border border-stone-200 z-0 relative">
                     <MapContainer center={[formData.lat, formData.lng]} zoom={13} scrollWheelZoom={false} className="h-full w-full">
                       <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                       <LocationPicker 
-                        position={[formData.lat, formData.lng]} 
-                        setPosition={(pos) => setFormData({...formData, lat: pos[0], lng: pos[1]})} 
+                        formData={formData} 
+                        setFormData={setFormData} 
                       />
                     </MapContainer>
                   </div>
-                  <p className="text-xs text-stone-500 mt-1">Ketuk peta untuk menandai lokasi sawah Anda.</p>
+                  <div className="flex justify-between items-center mt-1">
+                    <p className="text-xs text-stone-500">
+                      {formData.drawingPolygon ? 'Ketuk beberapa kali di peta batas sawah.' : 'Ketuk peta untuk menandai satu titik sawah Anda.'}
+                    </p>
+                    {formData.drawingPolygon && formData.polygon.length > 0 && (
+                      <button type="button" onClick={() => setFormData({...formData, polygon: []})} className="text-xs text-red-500">Reset Area</button>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-stone-700 mb-1">
