@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent, Fragment } from 'react';
+import { useState, useEffect, FormEvent, Fragment, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Camera, 
@@ -15,7 +15,8 @@ import {
   Sun,
   Map as MapIcon,
   MapPin,
-  Trash2
+  Trash2,
+  Upload
 } from 'lucide-react';
 import Webcam from 'react-webcam';
 import axios from 'axios';
@@ -121,6 +122,20 @@ const DetectionFeature = () => {
   
   const [farmerName, setFarmerName] = useState('');
   const [reporting, setReporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64String = reader.result as string;
+        setImgSrc(base64String);
+        analyzeImage(base64String);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const capture = (getScreenshot: () => string | null) => {
     const image = getScreenshot();
@@ -188,15 +203,31 @@ const DetectionFeature = () => {
       </header>
 
       {!imgSrc && !cameraOpen && (
-        <div className="bg-stone-100 rounded-2xl h-64 flex flex-col items-center justify-center border-2 border-dashed border-stone-300 mb-6">
-          <Sprout className="text-stone-400 mb-4" size={48} />
-          <button 
-            onClick={() => setCameraOpen(true)}
-            className="bg-emerald-600 text-white px-6 py-3 rounded-full font-medium shadow-lg hover:bg-emerald-700 transition-colors flex items-center gap-2"
-          >
-            <Camera size={20} />
-            Ambil Foto
-          </button>
+        <div className="bg-stone-100 rounded-2xl p-6 flex flex-col items-center justify-center border-2 border-dashed border-stone-300 mb-6 min-h-[16rem]">
+          <Sprout className="text-stone-400 mb-6" size={48} />
+          <div className="flex gap-3 w-full max-w-xs">
+            <button 
+              onClick={() => setCameraOpen(true)}
+              className="flex-1 bg-emerald-600 text-white py-3 px-2 rounded-xl font-medium shadow-md hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2"
+            >
+              <Camera size={20} />
+              <span className="text-sm">Kamera</span>
+            </button>
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              className="flex-1 bg-white text-emerald-700 border-2 border-emerald-600 py-3 px-2 rounded-xl font-medium shadow-sm hover:bg-emerald-50 transition-colors flex items-center justify-center gap-2"
+            >
+              <Upload size={20} />
+              <span className="text-sm">Galeri</span>
+            </button>
+            <input 
+              type="file" 
+              accept="image/*" 
+              ref={fileInputRef} 
+              className="hidden" 
+              onChange={handleFileUpload} 
+            />
+          </div>
         </div>
       )}
 
