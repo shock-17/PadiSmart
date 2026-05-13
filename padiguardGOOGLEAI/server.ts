@@ -24,25 +24,31 @@ db.exec(`
     harvestDate TEXT NOT NULL,
     areaSize REAL,
     lat REAL,
-    lng REAL
+    lng REAL,
+    polygon TEXT
   );
 
-  CREATE TABLE IF NOT EXISTS bookings (
+  CREATE TABLE IF NOT EXISTS disease_reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    resourceType TEXT NOT NULL, -- 'harvester' or 'drying_floor'
     farmerName TEXT NOT NULL,
-    date TEXT NOT NULL,
-    status TEXT DEFAULT 'confirmed'
+    diseaseName TEXT NOT NULL,
+    lat REAL NOT NULL,
+    lng REAL NOT NULL,
+    date TEXT NOT NULL
   );
 `);
 
-// Migration to add lat/lng if the table was created before
+// Migration to add columns if the table was created before
 try {
   db.exec('ALTER TABLE schedules ADD COLUMN lat REAL');
   db.exec('ALTER TABLE schedules ADD COLUMN lng REAL');
 } catch (e) {
   // Columns likely already exist
 }
+
+try {
+  db.exec('ALTER TABLE schedules ADD COLUMN polygon TEXT');
+} catch (e) {}
 
 async function startServer() {
   const app = express();
@@ -138,12 +144,32 @@ async function startServer() {
   });
 
   app.post("/api/schedules", (req, res) => {
-    const { farmerName, variety, plantingDate, harvestDate, areaSize, lat, lng } = req.body;
+    const { farmerName, variety, plantingDate, harvestDate, areaSize, lat, lng, polygon } = req.body;
+    let polygonStr = null;
+    if (polygon && Array.isArray(polygon) && polygon.length > 0) {
+      polygonStr = JSON.stringify(polygon);
+    }
     const stmt = db.prepare(`
-      INSERT INTO schedules (farmerName, variety, plantingDate, harvestDate, areaSize, lat, lng)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO schedules (farmerName, variety, plantingDate, harvestDate, areaSize, lat, lng, polygon)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    const info = stmt.run(farmerName, variety, plantingDate, harvestDate, areaSize, lat, lng);
+    const info = stmt.run(farmerName, variety, plantingDate, harvestDate, areaSize, lat, lng, polygonStr);
+    res.json({ id: info.lastInsertRowid });
+  });
+
+  // 3. Disease Reports
+  app.get("/api/reports", (req, res) => {
+    const stmt = db.prepare("SELECT * FROM disease_reports ORDER BY date DESC");
+    res.json(stmt.all());
+  });
+
+  app.post("/api/reports", (req, res) => {
+    const { farmerName, diseaseName, lat, lng, date } = req.body;
+    const stmt = db.prepare(`
+      INSERT INTO disease_reports (farmerName, diseaseName, lat, lng, date)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    const info = stmt.run(farmerName, diseaseName, lat, lng, date);
     res.json({ id: info.lastInsertRowid });
   });
 
