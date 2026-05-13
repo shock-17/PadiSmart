@@ -66,14 +66,6 @@ interface Schedule {
   lng?: number;
 }
 
-interface Booking {
-  id: number;
-  resourceType: 'harvester' | 'drying_floor';
-  farmerName: string;
-  date: string;
-  status: string;
-}
-
 // --- Components ---
 
 const Navigation = ({ activeTab, setTab }: { activeTab: Tab, setTab: (t: Tab) => void }) => (
@@ -426,8 +418,6 @@ const LocationPicker = ({ position, setPosition }: { position: [number, number],
 
 const CommunityFeature = () => {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
-  const [bookings, setBookings] = useState<Booking[]>([]);
-  const [view, setView] = useState<'schedule' | 'booking'>('schedule');
   
   // Form states
   const [showForm, setShowForm] = useState(false);
@@ -437,18 +427,13 @@ const CommunityFeature = () => {
     plantingDate: format(new Date(), 'yyyy-MM-dd'),
     areaSize: 1,
     lat: -6.2088,
-    lng: 106.8456,
-    resourceType: 'harvester'
+    lng: 106.8456
   });
 
   const fetchData = async () => {
     try {
-      const [schedRes, bookRes] = await Promise.all([
-        axios.get('/api/schedules'),
-        axios.get('/api/bookings')
-      ]);
+      const schedRes = await axios.get('/api/schedules');
       setSchedules(schedRes.data);
-      setBookings(bookRes.data);
     } catch (e) {
       console.error(e);
     }
@@ -460,28 +445,11 @@ const CommunityFeature = () => {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (view === 'schedule') {
-      // Calculate harvest date (approx 115 days for Ciherang)
-      const harvestDate = format(addDays(parseISO(formData.plantingDate), 115), 'yyyy-MM-dd');
-      await axios.post('/api/schedules', { ...formData, harvestDate });
-    } else {
-      await axios.post('/api/bookings', {
-        resourceType: formData.resourceType,
-        farmerName: formData.farmerName,
-        date: formData.plantingDate // reusing field for booking date
-      });
-    }
+    // Calculate harvest date (approx 115 days for Ciherang)
+    const harvestDate = format(addDays(parseISO(formData.plantingDate), 115), 'yyyy-MM-dd');
+    await axios.post('/api/schedules', { ...formData, harvestDate });
     setShowForm(false);
     fetchData();
-  };
-
-  const handleCancelBooking = async (id: number) => {
-    try {
-      await axios.delete(`/api/bookings/${id}`);
-      fetchData();
-    } catch (e) {
-      console.error('Gagal membatalkan pesanan', e);
-    }
   };
 
   return (
@@ -499,84 +467,29 @@ const CommunityFeature = () => {
         </button>
       </header>
 
-      <div className="flex gap-2 mb-6 bg-stone-100 p-1 rounded-xl">
-        <button 
-          onClick={() => setView('schedule')}
-          className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${view === 'schedule' ? 'bg-white shadow-sm text-stone-900' : 'text-stone-500'}`}
-        >
-          Jadwal Tanam
-        </button>
-        <button 
-          onClick={() => setView('booking')}
-          className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${view === 'booking' ? 'bg-white shadow-sm text-stone-900' : 'text-stone-500'}`}
-        >
-          Sewa Alat
-        </button>
+      <div className="space-y-4">
+        <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-xl mb-4">
+          <h3 className="text-emerald-800 font-bold text-sm mb-1">Rekomendasi Tanam</h3>
+          <p className="text-emerald-700 text-xs">
+            Disarankan menanam varietas <strong>Inpari 32</strong> mulai tanggal <strong>15-20 Oktober</strong> untuk menghindari panen raya serentak.
+          </p>
+        </div>
+
+        {schedules.map((s) => (
+          <div key={s.id} className="bg-white p-4 rounded-xl shadow-sm border border-stone-100 flex justify-between items-center">
+            <div>
+              <h3 className="font-bold text-stone-900">{s.farmerName}</h3>
+              <p className="text-xs text-stone-500">{s.variety} • {s.areaSize} Ha</p>
+            </div>
+            <div className="text-right">
+              <div className="text-xs text-stone-400">Panen</div>
+              <div className="font-mono font-medium text-emerald-600">
+                {format(parseISO(s.harvestDate), 'dd MMM')}
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
-
-      {view === 'schedule' ? (
-        <div className="space-y-4">
-          <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-xl mb-4">
-            <h3 className="text-emerald-800 font-bold text-sm mb-1">Rekomendasi Tanam</h3>
-            <p className="text-emerald-700 text-xs">
-              Disarankan menanam varietas <strong>Inpari 32</strong> mulai tanggal <strong>15-20 Oktober</strong> untuk menghindari panen raya serentak.
-            </p>
-          </div>
-
-          {schedules.map((s) => (
-            <div key={s.id} className="bg-white p-4 rounded-xl shadow-sm border border-stone-100 flex justify-between items-center">
-              <div>
-                <h3 className="font-bold text-stone-900">{s.farmerName}</h3>
-                <p className="text-xs text-stone-500">{s.variety} • {s.areaSize} Ha</p>
-              </div>
-              <div className="text-right">
-                <div className="text-xs text-stone-400">Panen</div>
-                <div className="font-mono font-medium text-emerald-600">
-                  {format(parseISO(s.harvestDate), 'dd MMM')}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-stone-100 text-center">
-              <Tractor className="mx-auto text-amber-500 mb-2" />
-              <div className="text-xs text-stone-500">Combine Harvester</div>
-              <div className="font-bold text-stone-900">2 Tersedia</div>
-            </div>
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-stone-100 text-center">
-              <Sun className="mx-auto text-orange-500 mb-2" />
-              <div className="text-xs text-stone-500">Lantai Jemur</div>
-              <div className="font-bold text-stone-900">5 Slot</div>
-            </div>
-          </div>
-
-          <h3 className="font-bold text-stone-900 text-sm">Daftar Booking</h3>
-          {bookings.map((b) => (
-            <div key={b.id} className="bg-white p-3 rounded-xl border border-stone-100 flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${b.resourceType === 'harvester' ? 'bg-amber-100 text-amber-600' : 'bg-orange-100 text-orange-600'}`}>
-                {b.resourceType === 'harvester' ? <Tractor size={18} /> : <Sun size={18} />}
-              </div>
-              <div className="flex-1">
-                <div className="font-medium text-sm">{b.farmerName}</div>
-                <div className="text-xs text-stone-500">{format(parseISO(b.date), 'dd MMMM yyyy')}</div>
-              </div>
-              <span className="text-xs font-medium bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">
-                {b.status}
-              </span>
-              <button 
-                onClick={() => handleCancelBooking(b.id)}
-                className="text-red-500 hover:bg-red-50 p-2 rounded-full transition-colors shrink-0"
-                title="Batal Booking"
-              >
-                <Trash2 size={16} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* Modal Form */}
       <AnimatePresence>
@@ -595,7 +508,7 @@ const CommunityFeature = () => {
             >
               <div className="flex justify-between items-center mb-4">
                 <h3 className="font-bold text-lg">
-                  {view === 'schedule' ? 'Catat Jadwal Tanam' : 'Booking Alat'}
+                  Catat Jadwal Tanam
                 </h3>
                 <button onClick={() => setShowForm(false)}><X /></button>
               </div>
@@ -610,64 +523,47 @@ const CommunityFeature = () => {
                     onChange={e => setFormData({...formData, farmerName: e.target.value})}
                   />
                 </div>
-                {view === 'schedule' && (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium text-stone-700 mb-1">Varietas</label>
-                      <select 
-                        className="w-full p-2 border border-stone-200 rounded-lg"
-                        value={formData.variety}
-                        onChange={e => setFormData({...formData, variety: e.target.value})}
-                      >
-                        <option>Ciherang</option>
-                        <option>Inpari 32</option>
-                        <option>Inpari 42</option>
-                        <option>Mekongga</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-stone-700 mb-1">Luas Lahan (Ha)</label>
-                      <input 
-                        type="number" 
-                        step="0.1"
-                        className="w-full p-2 border border-stone-200 rounded-lg"
-                        value={formData.areaSize}
-                        onChange={e => setFormData({...formData, areaSize: parseFloat(e.target.value)})}
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Varietas</label>
+                  <select 
+                    className="w-full p-2 border border-stone-200 rounded-lg"
+                    value={formData.variety}
+                    onChange={e => setFormData({...formData, variety: e.target.value})}
+                  >
+                    <option>Ciherang</option>
+                    <option>Inpari 32</option>
+                    <option>Inpari 42</option>
+                    <option>Mekongga</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1">Luas Lahan (Ha)</label>
+                  <input 
+                    type="number" 
+                    step="0.1"
+                    className="w-full p-2 border border-stone-200 rounded-lg"
+                    value={formData.areaSize}
+                    onChange={e => setFormData({...formData, areaSize: parseFloat(e.target.value)})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-stone-700 mb-1 flex items-center gap-2">
+                    <MapPin size={16} /> Lokasi Lahan
+                  </label>
+                  <div className="h-40 rounded-lg overflow-hidden border border-stone-200 z-0 relative">
+                    <MapContainer center={[formData.lat, formData.lng]} zoom={13} scrollWheelZoom={false} className="h-full w-full">
+                      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                      <LocationPicker 
+                        position={[formData.lat, formData.lng]} 
+                        setPosition={(pos) => setFormData({...formData, lat: pos[0], lng: pos[1]})} 
                       />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-stone-700 mb-1 flex items-center gap-2">
-                        <MapPin size={16} /> Lokasi Lahan
-                      </label>
-                      <div className="h-40 rounded-lg overflow-hidden border border-stone-200 z-0 relative">
-                        <MapContainer center={[formData.lat, formData.lng]} zoom={13} scrollWheelZoom={false} className="h-full w-full">
-                          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                          <LocationPicker 
-                            position={[formData.lat, formData.lng]} 
-                            setPosition={(pos) => setFormData({...formData, lat: pos[0], lng: pos[1]})} 
-                          />
-                        </MapContainer>
-                      </div>
-                      <p className="text-xs text-stone-500 mt-1">Ketuk peta untuk menandai lokasi sawah Anda.</p>
-                    </div>
-                  </>
-                )}
-                {view === 'booking' && (
-                  <div>
-                    <label className="block text-sm font-medium text-stone-700 mb-1">Jenis Alat</label>
-                    <select 
-                      className="w-full p-2 border border-stone-200 rounded-lg"
-                      value={formData.resourceType}
-                      onChange={e => setFormData({...formData, resourceType: e.target.value})}
-                    >
-                      <option value="harvester">Combine Harvester</option>
-                      <option value="drying_floor">Lantai Jemur</option>
-                    </select>
+                    </MapContainer>
                   </div>
-                )}
+                  <p className="text-xs text-stone-500 mt-1">Ketuk peta untuk menandai lokasi sawah Anda.</p>
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-stone-700 mb-1">
-                    {view === 'schedule' ? 'Tanggal Tanam' : 'Tanggal Booking'}
+                    Tanggal Tanam
                   </label>
                   <input 
                     type="date" 
