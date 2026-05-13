@@ -106,8 +106,26 @@ async function startServer() {
       res.json(JSON.parse(responseText));
     } catch (error: any) {
       console.error("Analysis error:", error);
-      // Return the actual error message from Gemini if available
-      const errorMessage = error.message || "Failed to analyze image";
+      let errorMessage = error.message || "Failed to analyze image";
+
+      // Try to parse JSON error message from GoogleGenAI
+      if (typeof errorMessage === 'string' && errorMessage.includes('{"error"')) {
+        try {
+          const jsonStr = errorMessage.substring(errorMessage.indexOf('{'));
+          const parsed = JSON.parse(jsonStr);
+          if (parsed.error?.message) {
+            errorMessage = parsed.error.message;
+          }
+        } catch (e) {
+          // ignore parsing error
+        }
+      }
+
+      // Add user-friendly translation for 503 high demand errors
+      if (errorMessage.includes("high demand") || errorMessage.includes("503")) {
+        errorMessage = "Sistem AI sedang sibuk (kapasitas penuh). Silakan coba lagi dalam beberapa menit.";
+      }
+
       res.status(500).json({ error: errorMessage });
     }
   });
@@ -127,30 +145,6 @@ async function startServer() {
     `);
     const info = stmt.run(farmerName, variety, plantingDate, harvestDate, areaSize, lat, lng);
     res.json({ id: info.lastInsertRowid });
-  });
-
-  // 3. Bookings
-  app.get("/api/bookings", (req, res) => {
-    const stmt = db.prepare("SELECT * FROM bookings ORDER BY date ASC");
-    const bookings = stmt.all();
-    res.json(bookings);
-  });
-
-  app.post("/api/bookings", (req, res) => {
-    const { resourceType, farmerName, date } = req.body;
-    const stmt = db.prepare(`
-      INSERT INTO bookings (resourceType, farmerName, date)
-      VALUES (?, ?, ?)
-    `);
-    const info = stmt.run(resourceType, farmerName, date);
-    res.json({ id: info.lastInsertRowid });
-  });
-
-  app.delete("/api/bookings/:id", (req, res) => {
-    const { id } = req.params;
-    const stmt = db.prepare("DELETE FROM bookings WHERE id = ?");
-    stmt.run(id);
-    res.json({ success: true });
   });
 
   // Vite Middleware
