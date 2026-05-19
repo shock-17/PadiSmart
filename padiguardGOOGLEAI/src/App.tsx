@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent, Fragment, useRef } from 'react';
+import React, { useState, useEffect, FormEvent, Fragment, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Camera, 
@@ -22,7 +22,7 @@ import Webcam from 'react-webcam';
 import axios from 'axios';
 import { format, addDays, parseISO, differenceInDays } from 'date-fns';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents, Polygon, CircleMarker } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents, Polygon, CircleMarker, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -638,7 +638,7 @@ const MapFeature = () => {
   );
 };
 
-const LocationPicker = ({ formData, setFormData, onCenterChange }: any) => {
+const LocationPicker = ({ formData, setFormData, onCenterChange, currentCenter }: any) => {
   const map = useMapEvents({
     click(e) {
       if (!formData.drawingPolygon) {
@@ -652,10 +652,36 @@ const LocationPicker = ({ formData, setFormData, onCenterChange }: any) => {
       }
     }
   });
+
+  const validPolygon = formData.polygon && Array.isArray(formData.polygon) ? formData.polygon : [];
+  const previewPolygon = formData.drawingPolygon && currentCenter 
+    ? [...validPolygon, currentCenter] 
+    : validPolygon;
+
   return (
     <>
       {!formData.drawingPolygon && formData.lat && <Marker position={[formData.lat, formData.lng]} />}
-      {formData.drawingPolygon && formData.polygon.length > 0 && <Polygon positions={formData.polygon} color="#10b981" />}
+      {formData.drawingPolygon && (
+        <>
+          {previewPolygon.length > 2 ? (
+            <Polygon positions={previewPolygon} color="#10b981" fillColor="#10b981" fillOpacity={0.2} dashArray="5, 10" />
+          ) : previewPolygon.length === 2 ? (
+            <Polyline positions={previewPolygon} color="#10b981" dashArray="5, 10" />
+          ) : null}
+
+          {validPolygon.length > 2 && (
+             <Polygon positions={validPolygon} color="#059669" fillColor="#10b981" fillOpacity={0.5} />
+          )}
+          
+          {validPolygon.length === 2 && (
+             <Polyline positions={validPolygon} color="#059669" />
+          )}
+
+          {validPolygon.length > 0 && validPolygon.map((p: any, i: number) => (
+            <CircleMarker key={i} center={p} radius={5} color="#059669" fillColor="#10b981" fillOpacity={1} />
+          ))}
+        </>
+      )}
     </>
   );
 };
@@ -806,27 +832,28 @@ const CommunityFeature = ({ currentUser }: { currentUser: User }) => {
                   <div className="h-56 rounded-lg overflow-hidden border border-stone-200 z-0 relative">
                     <MapContainer center={[formData.lat, formData.lng]} zoom={15} scrollWheelZoom={false} className="h-full w-full">
                       <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                      <LocationPicker 
+                       <LocationPicker 
                         formData={formData} 
-                        setFormData={setFormData} 
+                        setFormData={setFormData}
                         onCenterChange={(center: [number, number]) => setCurrentCenter(center)}
+                        currentCenter={currentCenter}
                       />
                     </MapContainer>
                     {formData.drawingPolygon && (
                       <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-[1000]">
-                        <div className="w-1 h-1 bg-red-500 rounded-full shadow"></div>
-                        <div className="absolute w-6 h-6 border-2 border-red-500 rounded-full shadow-sm"></div>
+                        <div className="w-1.5 h-1.5 bg-red-500 rounded-full shadow"></div>
+                        <div className="absolute w-8 h-8 border-2 border-red-500 rounded-full shadow-sm bg-white/20"></div>
                       </div>
                     )}
                     {formData.drawingPolygon && (
-                      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[1000]">
+                      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[1000]">
                         <button 
                           type="button" 
                           onClick={(e) => {
                             e.preventDefault();
                             setFormData({ ...formData, polygon: [...formData.polygon, currentCenter] });
                           }} 
-                          className="bg-emerald-600 text-white px-4 py-2 rounded-full text-xs font-semibold shadow-md pointer-events-auto active:bg-emerald-700 transition"
+                          className="bg-emerald-600 text-white px-5 py-2.5 rounded-full text-sm font-semibold shadow-lg pointer-events-auto active:bg-emerald-700 transition flex items-center gap-2"
                         >
                           + Tambah Titik
                         </button>
@@ -834,11 +861,14 @@ const CommunityFeature = ({ currentUser }: { currentUser: User }) => {
                     )}
                   </div>
                   <div className="flex justify-between items-start mt-2">
-                    <p className="text-xs text-stone-500 max-w-[70%]">
-                      {formData.drawingPolygon ? 'Geser peta ke sudut lahan, lalu tekan "+ Tambah Titik"' : 'Ketuk peta untuk menandai satu titik sawah Anda.'}
+                    <p className="text-xs text-stone-500 max-w-[65%] leading-relaxed">
+                      {formData.drawingPolygon ? 'Geser peta hingga kursor merah berada di sudut lahan, lalu tekan "+ Tambah Titik". Ulangi untuk setiap sudut.' : 'Ketuk peta untuk menandai satu titik sawah Anda.'}
                     </p>
                     {formData.drawingPolygon && formData.polygon.length > 0 && (
-                      <button type="button" onClick={() => setFormData({...formData, polygon: []})} className="text-xs text-red-500 font-medium">Reset Area</button>
+                      <div className="flex flex-col items-end gap-1">
+                        <button type="button" onClick={() => setFormData({...formData, polygon: formData.polygon.slice(0, -1)})} className="text-xs text-orange-500 font-medium">Batal 1 Titik</button>
+                        <button type="button" onClick={() => setFormData({...formData, polygon: []})} className="text-xs text-red-500 font-medium">Reset Area</button>
+                      </div>
                     )}
                   </div>
                 </div>
