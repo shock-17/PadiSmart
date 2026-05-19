@@ -68,6 +68,12 @@ interface Schedule {
   polygon?: string;
 }
 
+interface User {
+  username: string;
+  lat: number;
+  lng: number;
+}
+
 interface DiseaseReport {
   id: number;
   farmerName: string;
@@ -78,6 +84,97 @@ interface DiseaseReport {
 }
 
 // --- Components ---
+
+const SimpleLocationPicker = ({ position, setPosition }: { position: [number, number], setPosition: (pos: [number, number]) => void }) => {
+  useMapEvents({
+    click(e) {
+      setPosition([e.latlng.lat, e.latlng.lng]);
+    },
+  });
+  return <Marker position={position} />;
+};
+
+const AuthPage = ({ onLogin }: { onLogin: (u: User) => void }) => {
+  const [isLogin, setIsLogin] = useState(true);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [lat, setLat] = useState(-6.2088);
+  const [lng, setLng] = useState(106.8456);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isLogin && navigator.geolocation) {
+       navigator.geolocation.getCurrentPosition(pos => {
+          setLat(pos.coords.latitude);
+          setLng(pos.coords.longitude);
+       }, () => {});
+    }
+  }, [isLogin]);
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      if (isLogin) {
+        const res = await axios.post('/api/auth/login', { username, password });
+        onLogin(res.data.user);
+      } else {
+        const res = await axios.post('/api/auth/register', { username, password, lat, lng });
+        onLogin(res.data.user);
+      }
+    } catch (error: any) {
+      alert(error.response?.data?.error || 'Terjadi kesalahan');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-stone-50 p-4 flex flex-col justify-center items-center pb-12">
+       <form onSubmit={handleSubmit} className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 max-w-sm w-full">
+          <div className="text-center mb-6">
+            <h1 className="text-2xl font-black text-emerald-800 tracking-tight">PadiSmart</h1>
+            <p className="text-stone-500 text-sm">{isLogin ? 'Masuk ke akun Anda' : 'Daftar akun baru'}</p>
+          </div>
+          
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-stone-700 mb-1">Username</label>
+              <input type="text" required className="w-full p-2 border border-stone-200 rounded-lg" value={username} onChange={e => setUsername(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-stone-700 mb-1">Password</label>
+              <input type="password" required className="w-full p-2 border border-stone-200 rounded-lg" value={password} onChange={e => setPassword(e.target.value)} />
+            </div>
+
+            {!isLogin && (
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1 flex items-center gap-2">
+                  <MapPin size={16} /> Titik Default Lahan
+                </label>
+                <div className="h-40 rounded-lg overflow-hidden border border-stone-200 z-0 relative">
+                  <MapContainer center={[lat, lng]} zoom={13} scrollWheelZoom={false} className="h-full w-full">
+                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                    <SimpleLocationPicker position={[lat, lng]} setPosition={(p) => { setLat(p[0]); setLng(p[1]); }} />
+                  </MapContainer>
+                </div>
+                <p className="text-xs text-stone-500 mt-1">Tap pada peta untuk menentukan lokasi sawah Anda.</p>
+              </div>
+            )}
+          </div>
+
+          <button type="submit" disabled={loading} className="w-full bg-emerald-600 text-white py-3 rounded-xl font-medium mt-6 disabled:opacity-50 shadow-md">
+            {loading ? 'Memproses...' : (isLogin ? 'Masuk' : 'Daftar')}
+          </button>
+          
+          <p className="text-center text-sm text-stone-500 mt-4">
+            {isLogin ? 'Belum punya akun? ' : 'Sudah punya akun? '}
+            <button type="button" onClick={() => { setIsLogin(!isLogin); setUsername(''); setPassword(''); }} className="text-emerald-600 font-medium">{isLogin ? 'Daftar' : 'Masuk'}</button>
+          </p>
+       </form>
+    </div>
+  );
+}
 
 const Navigation = ({ activeTab, setTab }: { activeTab: Tab, setTab: (t: Tab) => void }) => (
   <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-stone-200 pb-safe pt-2 px-4 z-50 shadow-lg">
@@ -114,14 +211,16 @@ const Navigation = ({ activeTab, setTab }: { activeTab: Tab, setTab: (t: Tab) =>
   </nav>
 );
 
-const DetectionFeature = () => {
+const DetectionFeature = ({ currentUser, onLogout }: { currentUser: User, onLogout: () => void }) => {
   const [imgSrc, setImgSrc] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   
-  const [farmerName, setFarmerName] = useState('');
+  const [farmerName, setFarmerName] = useState(currentUser.username);
   const [reporting, setReporting] = useState(false);
+  const [reportLat, setReportLat] = useState(currentUser.lat);
+  const [reportLng, setReportLng] = useState(currentUser.lng);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -164,42 +263,31 @@ const DetectionFeature = () => {
   const handleReport = async () => {
     if (!farmerName) return;
     setReporting(true);
-    if (!navigator.geolocation) {
-       alert('Geolocation tidak didukung oleh browser Anda');
-       setReporting(false);
-       return;
-    }
     
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        try {
-          await axios.post('/api/reports', {
-            farmerName,
-            diseaseName: result?.condition,
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-            date: new Date().toISOString()
-          });
-          alert('Berhasil melaporkan ke peta!');
-          setFarmerName('');
-        } catch(e) {
-          alert('Gagal melaporkan');
-        } finally {
-          setReporting(false);
-        }
-      },
-      () => {
-        alert('Gagal mendapatkan lokasi. Pastikan izin lokasi aktif.');
-        setReporting(false);
-      }
-    );
+    try {
+      await axios.post('/api/reports', {
+        farmerName,
+        diseaseName: result?.condition,
+        lat: reportLat,
+        lng: reportLng,
+        date: new Date().toISOString()
+      });
+      alert('Berhasil melaporkan ke peta!');
+    } catch(e) {
+      alert('Gagal melaporkan');
+    } finally {
+      setReporting(false);
+    }
   };
 
   return (
     <div className="p-4 pb-24 max-w-md mx-auto">
-      <header className="mb-6">
-        <h1 className="text-2xl font-bold text-stone-900">Deteksi Penyakit</h1>
-        <p className="text-stone-500">Analisis kesehatan tanaman padi Anda</p>
+      <header className="mb-6 flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold text-stone-900">Deteksi Penyakit</h1>
+          <p className="text-stone-500">Analisis kesehatan tanaman padi Anda</p>
+        </div>
+        <button onClick={onLogout} className="text-xs font-semibold text-rose-600 bg-rose-50 px-3 py-2 rounded-lg">Logout</button>
       </header>
 
       {!imgSrc && !cameraOpen && (
@@ -325,23 +413,24 @@ const DetectionFeature = () => {
           {result.condition !== 'Healthy' && (
             <div className="border-t border-stone-100 pt-4 mt-4">
               <h3 className="text-sm font-semibold text-stone-700 mb-2">Laporkan Temuan di Peta</h3>
-              <div className="flex gap-2">
-                <input 
-                  type="text" 
-                  placeholder="Nama Anda" 
-                  className="flex-1 p-2 border border-stone-200 rounded-lg text-sm"
-                  value={farmerName}
-                  onChange={e => setFarmerName(e.target.value)}
-                />
-                <button 
-                  onClick={handleReport}
-                  disabled={!farmerName || reporting}
-                  className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
-                >
-                  {reporting ? 'Melapor...' : 'Laporkan'}
-                </button>
+              <p className="text-xs text-stone-500 mb-2">
+                Lokasi diambil dari titik default/lahan yang Anda daftarkan. Anda dapat menggeser pin jika titik temuan berbeda:
+              </p>
+              
+              <div className="h-40 rounded-lg overflow-hidden border border-stone-200 z-0 relative mb-3">
+                <MapContainer center={[reportLat, reportLng]} zoom={15} scrollWheelZoom={false} className="h-full w-full">
+                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                  <SimpleLocationPicker position={[reportLat, reportLng]} setPosition={(p) => { setReportLat(p[0]); setReportLng(p[1]); }} />
+                </MapContainer>
               </div>
-              <p className="text-xs text-stone-500 mt-2">Agar petani lain dapat mewaspadai penyebaran penyakit ini.</p>
+              
+              <button 
+                onClick={handleReport}
+                disabled={reporting}
+                className="w-full bg-red-500 text-white py-3 rounded-xl text-sm font-medium shadow-md disabled:opacity-50"
+              >
+                {reporting ? 'Melapor...' : 'Laporkan Area Ini'}
+              </button>
             </div>
           )}
         </motion.div>
@@ -567,18 +656,18 @@ const LocationPicker = ({ formData, setFormData }: any) => {
   );
 };
 
-const CommunityFeature = () => {
+const CommunityFeature = ({ currentUser }: { currentUser: User }) => {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   
   // Form states
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
-    farmerName: '',
+    farmerName: currentUser.username,
     variety: 'Ciherang',
     plantingDate: format(new Date(), 'yyyy-MM-dd'),
     areaSize: 1,
-    lat: -6.2088,
-    lng: 106.8456,
+    lat: currentUser.lat,
+    lng: currentUser.lng,
     polygon: [] as [number, number][],
     drawingPolygon: false
   });
@@ -670,10 +759,9 @@ const CommunityFeature = () => {
                   <label className="block text-sm font-medium text-stone-700 mb-1">Nama Petani</label>
                   <input 
                     type="text" 
-                    required
-                    className="w-full p-2 border border-stone-200 rounded-lg"
+                    readOnly
+                    className="w-full p-2 border border-stone-200 rounded-lg bg-stone-100 text-stone-500 cursor-not-allowed"
                     value={formData.farmerName}
-                    onChange={e => setFormData({...formData, farmerName: e.target.value})}
                   />
                 </div>
                 <div>
@@ -754,14 +842,32 @@ const CommunityFeature = () => {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('detect');
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    const saved = localStorage.getItem('padismart_user');
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  const handleLogin = (user: User) => {
+    setCurrentUser(user);
+    localStorage.setItem('padismart_user', JSON.stringify(user));
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    localStorage.removeItem('padismart_user');
+  };
+
+  if (!currentUser) {
+    return <AuthPage onLogin={handleLogin} />;
+  }
 
   return (
     <div className="min-h-screen bg-stone-50 font-sans text-stone-900">
       <main>
-        {activeTab === 'detect' && <DetectionFeature />}
+        {activeTab === 'detect' && <DetectionFeature currentUser={currentUser} onLogout={handleLogout} />}
         {activeTab === 'irrigation' && <IrrigationFeature />}
         {activeTab === 'map' && <MapFeature />}
-        {activeTab === 'community' && <CommunityFeature />}
+        {activeTab === 'community' && <CommunityFeature currentUser={currentUser} />}
       </main>
       <Navigation activeTab={activeTab} setTab={setActiveTab} />
     </div>
