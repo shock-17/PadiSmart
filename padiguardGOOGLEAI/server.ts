@@ -4,6 +4,7 @@ import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
 import { GoogleGenAI } from "@google/genai";
 import path from "path";
+import crypto from "crypto";
 import { fileURLToPath } from "url";
 import fs from "fs";
 
@@ -16,6 +17,14 @@ db.pragma("journal_mode = WAL");
 
 // Initialize Tables
 db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    lat REAL,
+    lng REAL
+  );
+
   CREATE TABLE IF NOT EXISTS schedules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     farmerName TEXT NOT NULL,
@@ -55,6 +64,36 @@ async function startServer() {
   const PORT = process.env.PORT || 3000;
 
   app.use(express.json({ limit: "10mb" }));
+
+  // Auth Routes
+  const hashPwd = (p: string) => crypto.createHash('sha256').update(p).digest('hex');
+
+  app.post('/api/auth/register', (req, res) => {
+    const { username, password, lat, lng } = req.body;
+    if (!username || !password) return res.status(400).json({error: 'Username dan password wajib diisi'});
+    try {
+      const stmt = db.prepare('INSERT INTO users (username, password, lat, lng) VALUES (?, ?, ?, ?)');
+      stmt.run(username, hashPwd(password), lat, lng);
+      res.json({ success: true, user: { username, lat, lng } });
+    } catch (e: any) {
+      if (e.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+        res.status(400).json({ error: 'Username sudah digunakan' });
+      } else {
+        res.status(500).json({ error: 'Terjadi kesalahan' });
+      }
+    }
+  });
+
+  app.post('/api/auth/login', (req, res) => {
+    const { username, password } = req.body;
+    const stmt = db.prepare('SELECT username, lat, lng FROM users WHERE username = ? AND password = ?');
+    const user = stmt.get(username, hashPwd(password));
+    if (user) {
+      res.json({ success: true, user });
+    } else {
+      res.status(401).json({ error: 'Username atau password salah' });
+    }
+  });
 
   // API Routes
 
