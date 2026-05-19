@@ -638,15 +638,19 @@ const MapFeature = () => {
   );
 };
 
-const LocationPicker = ({ formData, setFormData }: any) => {
-  useMapEvents({
+const LocationPicker = ({ formData, setFormData, onCenterChange }: any) => {
+  const map = useMapEvents({
     click(e) {
-      if (formData.drawingPolygon) {
-        setFormData({ ...formData, polygon: [...formData.polygon, [e.latlng.lat, e.latlng.lng]] });
-      } else {
+      if (!formData.drawingPolygon) {
         setFormData({ ...formData, lat: e.latlng.lat, lng: e.latlng.lng });
       }
+      // If drawing polygon, we rely on the button, not click, to prevent imprecise mobile taps
     },
+    move() {
+      if (onCenterChange) {
+        onCenterChange([map.getCenter().lat, map.getCenter().lng]);
+      }
+    }
   });
   return (
     <>
@@ -658,6 +662,7 @@ const LocationPicker = ({ formData, setFormData }: any) => {
 
 const CommunityFeature = ({ currentUser }: { currentUser: User }) => {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [currentCenter, setCurrentCenter] = useState<[number, number]>([currentUser.lat, currentUser.lng]);
   
   // Form states
   const [showForm, setShowForm] = useState(false);
@@ -798,21 +803,42 @@ const CommunityFeature = ({ currentUser }: { currentUser: User }) => {
                       {formData.drawingPolygon ? 'Ubah ke Titik' : 'Gambar Area (Polygon)'}
                     </button>
                   </label>
-                  <div className="h-40 rounded-lg overflow-hidden border border-stone-200 z-0 relative">
-                    <MapContainer center={[formData.lat, formData.lng]} zoom={13} scrollWheelZoom={false} className="h-full w-full">
+                  <div className="h-56 rounded-lg overflow-hidden border border-stone-200 z-0 relative">
+                    <MapContainer center={[formData.lat, formData.lng]} zoom={15} scrollWheelZoom={false} className="h-full w-full">
                       <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                       <LocationPicker 
                         formData={formData} 
                         setFormData={setFormData} 
+                        onCenterChange={(center: [number, number]) => setCurrentCenter(center)}
                       />
                     </MapContainer>
+                    {formData.drawingPolygon && (
+                      <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-[1000]">
+                        <div className="w-1 h-1 bg-red-500 rounded-full shadow"></div>
+                        <div className="absolute w-6 h-6 border-2 border-red-500 rounded-full shadow-sm"></div>
+                      </div>
+                    )}
+                    {formData.drawingPolygon && (
+                      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[1000]">
+                        <button 
+                          type="button" 
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setFormData({ ...formData, polygon: [...formData.polygon, currentCenter] });
+                          }} 
+                          className="bg-emerald-600 text-white px-4 py-2 rounded-full text-xs font-semibold shadow-md pointer-events-auto active:bg-emerald-700 transition"
+                        >
+                          + Tambah Titik
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  <div className="flex justify-between items-center mt-1">
-                    <p className="text-xs text-stone-500">
-                      {formData.drawingPolygon ? 'Ketuk beberapa kali di peta batas sawah.' : 'Ketuk peta untuk menandai satu titik sawah Anda.'}
+                  <div className="flex justify-between items-start mt-2">
+                    <p className="text-xs text-stone-500 max-w-[70%]">
+                      {formData.drawingPolygon ? 'Geser peta ke sudut lahan, lalu tekan "+ Tambah Titik"' : 'Ketuk peta untuk menandai satu titik sawah Anda.'}
                     </p>
                     {formData.drawingPolygon && formData.polygon.length > 0 && (
-                      <button type="button" onClick={() => setFormData({...formData, polygon: []})} className="text-xs text-red-500">Reset Area</button>
+                      <button type="button" onClick={() => setFormData({...formData, polygon: []})} className="text-xs text-red-500 font-medium">Reset Area</button>
                     )}
                   </div>
                 </div>
