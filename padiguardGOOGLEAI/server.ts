@@ -61,7 +61,7 @@ try {
 
 async function startServer() {
   const app = express();
-  const PORT = process.env.PORT || 3000;
+  const PORT = parseInt(process.env.PORT as string, 10) || 3000;
 
   app.use(express.json({ limit: "10mb" }));
 
