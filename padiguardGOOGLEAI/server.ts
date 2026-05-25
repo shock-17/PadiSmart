@@ -122,37 +122,46 @@ async function startServer() {
       let condition = result.prediction;
       let treatment = "";
       let description = "Klasifikasi gambar: " + condition;
+      const normalizedCondition = String(condition).toLowerCase();
+      const confidence = Number(result.confidence ?? result.all_scores?.[0]?.confidence ?? 0);
+      const isNotRice = /not.*rice|bukan.*padi|unknown|uncertain|unclear|non[- ]rice/i.test(normalizedCondition) || confidence < 0.35;
       
-      switch (condition) {
-        case "Healthy Rice Leaf":
-          condition = "Healthy";
-          treatment = "Tanaman sehat. Pertahankan nutrisi dan sistem pengairan yang baik untuk pertumbuhan optimal.";
-          description = "Daun padi terlihat sehat tanpa gejala penyakit. Terus pantau lahan secara rutin.";
-          break;
-        case "Brown Spot":
-          treatment = "Gunakan fungisida berbahan aktif trisiklazol atau propikonazol. Kurangi kelembapan lingkungan lahan, pastikan jarak tanam yang baik.";
-          break;
-        case "Leaf scald":
-          treatment = "Gunakan benih tahan penyakit dan dapat diobati dengan fungisida pelindung. Hindari pemupukan nitrogen yang terlalu berlebihan.";
-          break;
-        case "Leaf Blast":
-          condition = "Blast";
-          treatment = "Segera semprotkan fungisida trisiklazol atau benomil. Hindari pemupukan Urea (nitrogen) secara berlebihan pada fase rentan.";
-          break;
-        case "Bacterial Leaf Blight":
-          condition = "HDB (Bacterial Leaf Blight)";
-          treatment = "Kurangi pupuk nitrogen, gunakan agens hayati bakteri antagonis atau bakterisida. Jaga drainase pesawahan agar tidak tergenang berlebihan.";
-          break;
-        case "Sheath Blight":
-          treatment = "Kurangi tingkat kelembaban kanopi, aplikasikan fungisida heksakonazol atau validamisin sesuai anjuran dosis sesegera mungkin.";
-          break;
-        default:
-          treatment = "Tingkatkan observasi lapangan. Perhatikan asupan air dan pola pemupukan untuk mitigasi tahap awal.";
+      if (isNotRice) {
+        condition = "Not Rice";
+        treatment = "Foto yang diunggah tampaknya bukan daun padi atau hasil klasifikasi tidak meyakinkan. Silakan unggah foto daun padi yang jelas dan coba lagi.";
+        description = "Bukan tanaman padi atau kualitas gambar kurang jelas untuk klasifikasi penyakit padi.";
+      } else {
+        switch (condition) {
+          case "Healthy Rice Leaf":
+            condition = "Healthy";
+            treatment = "Tanaman sehat. Pertahankan nutrisi dan sistem pengairan yang baik untuk pertumbuhan optimal.";
+            description = "Daun padi terlihat sehat tanpa gejala penyakit. Terus pantau lahan secara rutin.";
+            break;
+          case "Brown Spot":
+            treatment = "Gunakan fungisida berbahan aktif trisiklazol atau propikonazol. Kurangi kelembapan lingkungan lahan, pastikan jarak tanam yang baik.";
+            break;
+          case "Leaf scald":
+            treatment = "Gunakan benih tahan penyakit dan dapat diobati dengan fungisida pelindung. Hindari pemupukan nitrogen yang terlalu berlebihan.";
+            break;
+          case "Leaf Blast":
+            condition = "Blast";
+            treatment = "Segera semprotkan fungisida trisiklazol atau benomil. Hindari pemupukan Urea (nitrogen) secara berlebihan pada fase rentan.";
+            break;
+          case "Bacterial Leaf Blight":
+            condition = "HDB (Bacterial Leaf Blight)";
+            treatment = "Kurangi pupuk nitrogen, gunakan agens hayati bakteri antagonis atau bakterisida. Jaga drainase pesawahan agar tidak tergenang berlebihan.";
+            break;
+          case "Sheath Blight":
+            treatment = "Kurangi tingkat kelembaban kanopi, aplikasikan fungisida heksakonazol atau validamisin sesuai anjuran dosis sesegera mungkin.";
+            break;
+          default:
+            treatment = "Tingkatkan observasi lapangan. Perhatikan asupan air dan pola pemupukan untuk mitigasi tahap awal.";
+        }
       }
       
       res.json({
         condition: condition,
-        confidence: result.confidence || (result.all_scores?.[0]?.confidence ?? 0),
+        confidence: confidence,
         treatment: treatment,
         description: description
       });
