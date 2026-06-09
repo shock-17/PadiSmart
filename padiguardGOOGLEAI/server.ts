@@ -6,6 +6,7 @@ import { GoogleGenAI } from "@google/genai";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
+import axios from "axios";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -15,6 +16,9 @@ const ai =
   geminiApiKey && geminiApiKey !== "MY_GEMINI_API_KEY"
     ? new GoogleGenAI({ apiKey: geminiApiKey })
     : null;
+
+// RiceAPI endpoint — set this to your deployed RiceAPI URL
+const RICE_API_URL = process.env.RICE_API_URL || "http://localhost:8000";
 
 // --- Input validation helpers ---
 function validateSchedule(body: any): string | null {
@@ -92,15 +96,57 @@ async function startServer() {
 
   // API Routes
 
-  // 1. Analyze Image (Gemini)
+  // 1. Analyze Image — try RiceAPI first, fall back to Gemini
   app.post("/api/analyze", async (req, res) => {
     try {
       const { image } = req.body; // base64 image
       if (!image) return res.status(400).json({ error: "No image provided" });
 
-      // Use module-level singleton — no re-creation per request
+      // Remove data URL header if present (data:image/jpeg;base64,...)
+      const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
+      const imageBuffer = Buffer.from(base64Data, "base64");
+
+      // --- Step 1: Try RiceAPI ---
+      try {
+        const formData = new FormData();
+        const blob = new Blob([imageBuffer], { type: "image/jpeg" });
+        formData.append("file", blob, "image.jpg");
+
+        const riceResponse = await axios.post(
+          `${RICE_API_URL}/predict`,
+          formData,
+          { timeout: 30000 } // 30s timeout
+        );
+
+        const data = riceResponse.data;
+
+        // If RiceAPI returned a Gemini-sourced result, it already has the right shape
+        if (data.source === "gemini" && data.condition) {
+          return res.json(data);
+        }
+
+        // If RiceAPI returned a local-model result, map to the expected format
+        if (data.prediction) {
+          return res.json({
+            condition: data.prediction,
+            confidence: data.confidence,
+            treatment: data.message || "Lihat hasil klasifikasi untuk detail lebih lanjut.",
+            description: `Terdeteksi oleh model RiceAPI (validated by: ${data.validated_by})`,
+            source: "riceapi",
+          });
+        }
+
+        // Unexpected response shape — fall through to Gemini
+        console.warn("RiceAPI returned unexpected format, falling back to Gemini:", data);
+      } catch (riceError: any) {
+        console.warn("RiceAPI unavailable, falling back to Gemini:", riceError.message);
+      }
+
+      // --- Step 2: Fallback to direct Gemini call ---
       if (!ai) {
-        return res.status(500).json({ error: "Gemini API Key not configured. Please set it in the Secrets panel." });
+        return res.status(500).json({
+          error: "RiceAPI is unavailable and Gemini API Key is not configured.",
+        });
       }
 
       const prompt = `
@@ -121,9 +167,6 @@ async function startServer() {
         - treatment: string (specific advice in Indonesian)
         - description: string (brief description of what is seen)
       `;
-
-      // Remove header if present (data:image/jpeg;base64,)
-      const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
 
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
