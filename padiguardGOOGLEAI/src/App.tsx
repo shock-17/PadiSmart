@@ -370,7 +370,6 @@ const DetectionFeature = ({ currentUser, onLogout }: { currentUser: User, onLogo
         <div className="text-center py-8">
           <div className="animate-spin w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full mx-auto mb-4"></div>
           <p className="text-stone-600 font-medium">Menganalisis tanaman...</p>
-          <p className="text-xs text-stone-400 mt-1">Menggunakan Gemini AI</p>
         </div>
       )}
 
