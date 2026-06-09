@@ -2,28 +2,57 @@ import "dotenv/config";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
+import { GoogleGenAI } from "@google/genai";
 import path from "path";
-import crypto from "crypto";
 import { fileURLToPath } from "url";
 import fs from "fs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Initialize Gemini client once at module level (avoid re-creating per request)
+const geminiApiKey = process.env.GEMINI_API_KEY;
+const ai =
+  geminiApiKey && geminiApiKey !== "MY_GEMINI_API_KEY"
+    ? new GoogleGenAI({ apiKey: geminiApiKey })
+    : null;
+
+// --- Input validation helpers ---
+function validateSchedule(body: any): string | null {
+  const { farmerName, variety, plantingDate, harvestDate, areaSize, lat, lng } = body;
+  if (!farmerName || typeof farmerName !== "string" || farmerName.length > 200)
+    return "farmerName is required (string, max 200 chars)";
+  if (!variety || typeof variety !== "string")
+    return "variety is required";
+  if (!plantingDate || isNaN(Date.parse(plantingDate)))
+    return "plantingDate must be a valid date string";
+  if (!harvestDate || isNaN(Date.parse(harvestDate)))
+    return "harvestDate must be a valid date string";
+  if (areaSize !== undefined && (typeof areaSize !== "number" || areaSize < 0))
+    return "areaSize must be a non-negative number";
+  if (lat !== undefined && (typeof lat !== "number" || lat < -90 || lat > 90))
+    return "lat must be a number between -90 and 90";
+  if (lng !== undefined && (typeof lng !== "number" || lng < -180 || lng > 180))
+    return "lng must be a number between -180 and 180";
+  return null;
+}
+
+function validateBooking(body: any): string | null {
+  const { resourceType, farmerName, date } = body;
+  if (!resourceType || !['harvester', 'drying_floor'].includes(resourceType))
+    return "resourceType must be 'harvester' or 'drying_floor'";
+  if (!farmerName || typeof farmerName !== "string" || farmerName.length > 200)
+    return "farmerName is required (string, max 200 chars)";
+  if (!date || isNaN(Date.parse(date)))
+    return "date must be a valid date string";
+  return null;
+}
+
 // Initialize Database
-const dbPath = process.env.DB_PATH || "padiguard.db";
-const db = new Database(dbPath);
+const db = new Database("padiguard.db");
 db.pragma("journal_mode = WAL");
 
 // Initialize Tables
 db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    lat REAL,
-    lng REAL
-  );
-
   CREATE TABLE IF NOT EXISTS schedules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     farmerName TEXT NOT NULL,
@@ -32,67 +61,34 @@ db.exec(`
     harvestDate TEXT NOT NULL,
     areaSize REAL,
     lat REAL,
-    lng REAL,
-    polygon TEXT
+    lng REAL
   );
 
-  CREATE TABLE IF NOT EXISTS disease_reports (
+  CREATE TABLE IF NOT EXISTS bookings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resourceType TEXT NOT NULL, -- 'harvester' or 'drying_floor'
     farmerName TEXT NOT NULL,
-    diseaseName TEXT NOT NULL,
-    lat REAL NOT NULL,
-    lng REAL NOT NULL,
-    date TEXT NOT NULL
+    date TEXT NOT NULL,
+    status TEXT DEFAULT 'confirmed'
   );
 `);
 
-// Migration to add columns if the table was created before
+// Migration to add lat/lng if the table was created before
 try {
   db.exec('ALTER TABLE schedules ADD COLUMN lat REAL');
   db.exec('ALTER TABLE schedules ADD COLUMN lng REAL');
-} catch (e) {
-  // Columns likely already exist
+} catch (e: any) {
+  // Only swallow "duplicate column" errors; re-throw anything unexpected
+  if (!e.message?.includes("duplicate column name")) {
+    throw e;
+  }
 }
-
-try {
-  db.exec('ALTER TABLE schedules ADD COLUMN polygon TEXT');
-} catch (e) {}
 
 async function startServer() {
   const app = express();
-  const PORT = parseInt(process.env.PORT as string, 10) || 3000;
+  const PORT = parseInt(process.env.PORT || "3000", 10);
 
   app.use(express.json({ limit: "10mb" }));
-
-  // Auth Routes
-  const hashPwd = (p: string) => crypto.createHash('sha256').update(p).digest('hex');
-
-  app.post('/api/auth/register', (req, res) => {
-    const { username, password, lat, lng } = req.body;
-    if (!username || !password) return res.status(400).json({error: 'Username dan password wajib diisi'});
-    try {
-      const stmt = db.prepare('INSERT INTO users (username, password, lat, lng) VALUES (?, ?, ?, ?)');
-      stmt.run(username, hashPwd(password), lat, lng);
-      res.json({ success: true, user: { username, lat, lng } });
-    } catch (e: any) {
-      if (e.code === 'SQLITE_CONSTRAINT_UNIQUE') {
-        res.status(400).json({ error: 'Username sudah digunakan' });
-      } else {
-        res.status(500).json({ error: 'Terjadi kesalahan' });
-      }
-    }
-  });
-
-  app.post('/api/auth/login', (req, res) => {
-    const { username, password } = req.body;
-    const stmt = db.prepare('SELECT username, lat, lng FROM users WHERE username = ? AND password = ?');
-    const user = stmt.get(username, hashPwd(password));
-    if (user) {
-      res.json({ success: true, user });
-    } else {
-      res.status(401).json({ error: 'Username atau password salah' });
-    }
-  });
 
   // API Routes
 
@@ -102,72 +98,60 @@ async function startServer() {
       const { image } = req.body; // base64 image
       if (!image) return res.status(400).json({ error: "No image provided" });
 
+      // Use module-level singleton — no re-creation per request
+      if (!ai) {
+        return res.status(500).json({ error: "Gemini API Key not configured. Please set it in the Secrets panel." });
+      }
+
+      const prompt = `
+        Analyze this image of a paddy plant. 
+        Identify if it has one of these 6 conditions: 
+        1. Blast
+        2. HDB (Bacterial Leaf Blight)
+        3. Tungro
+        4. Brown Planthopper (Wereng Cokelat)
+        5. Golden Apple Snail (Keong Mas)
+        6. Nitrogen Deficiency
+        
+        Or if it looks Healthy.
+        
+        Return a JSON object with:
+        - condition: string (one of the above or "Healthy" or "Unknown")
+        - confidence: number (0-100)
+        - treatment: string (specific advice in Indonesian)
+        - description: string (brief description of what is seen)
+      `;
+
+      // Remove header if present (data:image/jpeg;base64,)
       const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
-      const buffer = Buffer.from(base64Data, "base64");
-      const blob = new Blob([buffer], { type: "image/jpeg" });
-      const form = new FormData();
-      form.append('file', blob, 'image.jpg');
 
-      const fetchRes = await fetch("https://riceapi-production.up.railway.app/predict", {
-        method: "POST",
-        body: form,
-      });
-
-      if (!fetchRes.ok) {
-        throw new Error(`API returned status: ${fetchRes.status}`);
-      }
-
-      const result = await fetchRes.json();
-      
-      let condition = result.prediction;
-      let treatment = "";
-      let description = "Klasifikasi gambar: " + condition;
-      const normalizedCondition = String(condition).toLowerCase();
-      const confidence = Number(result.confidence ?? result.all_scores?.[0]?.confidence ?? 0);
-      const isNotRice = /not.*rice|bukan.*padi|unknown|uncertain|unclear|non[- ]rice/i.test(normalizedCondition) || confidence < 0.35;
-      
-      if (isNotRice) {
-        condition = "Not Rice";
-        treatment = "Foto yang diunggah tampaknya bukan daun padi atau hasil klasifikasi tidak meyakinkan. Silakan unggah foto daun padi yang jelas dan coba lagi.";
-        description = "Bukan tanaman padi atau kualitas gambar kurang jelas untuk klasifikasi penyakit padi.";
-      } else {
-        switch (condition) {
-          case "Healthy Rice Leaf":
-            condition = "Healthy";
-            treatment = "Tanaman sehat. Pertahankan nutrisi dan sistem pengairan yang baik untuk pertumbuhan optimal.";
-            description = "Daun padi terlihat sehat tanpa gejala penyakit. Terus pantau lahan secara rutin.";
-            break;
-          case "Brown Spot":
-            treatment = "Gunakan fungisida berbahan aktif trisiklazol atau propikonazol. Kurangi kelembapan lingkungan lahan, pastikan jarak tanam yang baik.";
-            break;
-          case "Leaf scald":
-            treatment = "Gunakan benih tahan penyakit dan dapat diobati dengan fungisida pelindung. Hindari pemupukan nitrogen yang terlalu berlebihan.";
-            break;
-          case "Leaf Blast":
-            condition = "Blast";
-            treatment = "Segera semprotkan fungisida trisiklazol atau benomil. Hindari pemupukan Urea (nitrogen) secara berlebihan pada fase rentan.";
-            break;
-          case "Bacterial Leaf Blight":
-            condition = "HDB (Bacterial Leaf Blight)";
-            treatment = "Kurangi pupuk nitrogen, gunakan agens hayati bakteri antagonis atau bakterisida. Jaga drainase pesawahan agar tidak tergenang berlebihan.";
-            break;
-          case "Sheath Blight":
-            treatment = "Kurangi tingkat kelembaban kanopi, aplikasikan fungisida heksakonazol atau validamisin sesuai anjuran dosis sesegera mungkin.";
-            break;
-          default:
-            treatment = "Tingkatkan observasi lapangan. Perhatikan asupan air dan pola pemupukan untuk mitigasi tahap awal.";
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: {
+          parts: [
+            { text: prompt },
+            { inlineData: { mimeType: "image/jpeg", data: base64Data } },
+          ],
+        },
+        config: {
+          responseMimeType: "application/json",
         }
-      }
-      
-      res.json({
-        condition: condition,
-        confidence: confidence,
-        treatment: treatment,
-        description: description
       });
+
+      // Check for safety-filter blocks or empty response
+      const responseText = response.text;
+      if (!responseText) {
+        const blockReason = (response as any).candidates?.[0]?.finishReason;
+        throw new Error(
+          blockReason === "SAFETY"
+            ? "Image was flagged by safety filters"
+            : "No response from AI model"
+        );
+      }
+      res.json(JSON.parse(responseText));
     } catch (error: any) {
       console.error("Analysis error:", error);
-      res.status(500).json({ error: error.message || "Failed to analyze image" });
+      res.status(500).json({ error: "Failed to analyze image. Please try again." });
     }
   });
 
@@ -179,32 +163,35 @@ async function startServer() {
   });
 
   app.post("/api/schedules", (req, res) => {
-    const { farmerName, variety, plantingDate, harvestDate, areaSize, lat, lng, polygon } = req.body;
-    let polygonStr = null;
-    if (polygon && Array.isArray(polygon) && polygon.length > 0) {
-      polygonStr = JSON.stringify(polygon);
-    }
+    const validationError = validateSchedule(req.body);
+    if (validationError) return res.status(400).json({ error: validationError });
+
+    const { farmerName, variety, plantingDate, harvestDate, areaSize, lat, lng } = req.body;
     const stmt = db.prepare(`
-      INSERT INTO schedules (farmerName, variety, plantingDate, harvestDate, areaSize, lat, lng, polygon)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO schedules (farmerName, variety, plantingDate, harvestDate, areaSize, lat, lng)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
-    const info = stmt.run(farmerName, variety, plantingDate, harvestDate, areaSize, lat, lng, polygonStr);
+    const info = stmt.run(farmerName, variety, plantingDate, harvestDate, areaSize ?? null, lat ?? null, lng ?? null);
     res.json({ id: info.lastInsertRowid });
   });
 
-  // 3. Disease Reports
-  app.get("/api/reports", (req, res) => {
-    const stmt = db.prepare("SELECT * FROM disease_reports ORDER BY date DESC");
-    res.json(stmt.all());
+  // 3. Bookings
+  app.get("/api/bookings", (req, res) => {
+    const stmt = db.prepare("SELECT * FROM bookings ORDER BY date ASC");
+    const bookings = stmt.all();
+    res.json(bookings);
   });
 
-  app.post("/api/reports", (req, res) => {
-    const { farmerName, diseaseName, lat, lng, date } = req.body;
+  app.post("/api/bookings", (req, res) => {
+    const validationError = validateBooking(req.body);
+    if (validationError) return res.status(400).json({ error: validationError });
+
+    const { resourceType, farmerName, date } = req.body;
     const stmt = db.prepare(`
-      INSERT INTO disease_reports (farmerName, diseaseName, lat, lng, date)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO bookings (resourceType, farmerName, date)
+      VALUES (?, ?, ?)
     `);
-    const info = stmt.run(farmerName, diseaseName, lat, lng, date);
+    const info = stmt.run(resourceType, farmerName, date);
     res.json({ id: info.lastInsertRowid });
   });
 
@@ -220,9 +207,20 @@ async function startServer() {
     app.use(express.static(path.join(__dirname, "dist")));
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
+
+  // Graceful shutdown: close HTTP server and DB on termination
+  const shutdown = () => {
+    console.log("Shutting down gracefully...");
+    server.close(() => {
+      db.close();
+      process.exit(0);
+    });
+  };
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 }
 
 startServer();
