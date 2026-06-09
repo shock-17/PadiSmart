@@ -75,6 +75,23 @@ db.exec(`
     date TEXT NOT NULL,
     status TEXT DEFAULT 'confirmed'
   );
+
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password TEXT NOT NULL,
+    lat REAL NOT NULL,
+    lng REAL NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    farmerName TEXT NOT NULL,
+    diseaseName TEXT NOT NULL,
+    lat REAL NOT NULL,
+    lng REAL NOT NULL,
+    date TEXT NOT NULL
+  );
 `);
 
 // Migration to add lat/lng if the table was created before
@@ -235,6 +252,62 @@ async function startServer() {
       VALUES (?, ?, ?)
     `);
     const info = stmt.run(resourceType, farmerName, date);
+    res.json({ id: info.lastInsertRowid });
+  });
+
+  // 4. Auth
+  app.post("/api/auth/register", (req, res) => {
+    const { username, password, lat, lng } = req.body;
+    if (!username || typeof username !== "string" || username.length > 100) {
+      return res.status(400).json({ error: "Username wajib diisi (maks 100 karakter)" });
+    }
+    if (!password || typeof password !== "string" || password.length < 4) {
+      return res.status(400).json({ error: "Password minimal 4 karakter" });
+    }
+    if (typeof lat !== "number" || typeof lng !== "number") {
+      return res.status(400).json({ error: "Lokasi (lat/lng) wajib diisi" });
+    }
+
+    // Check if username already exists
+    const existing = db.prepare("SELECT id FROM users WHERE username = ?").get(username);
+    if (existing) {
+      return res.status(409).json({ error: "Username sudah terdaftar" });
+    }
+
+    const stmt = db.prepare("INSERT INTO users (username, password, lat, lng) VALUES (?, ?, ?, ?)");
+    stmt.run(username, password, lat, lng);
+    res.json({ user: { username, lat, lng } });
+  });
+
+  app.post("/api/auth/login", (req, res) => {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ error: "Username dan password wajib diisi" });
+    }
+
+    const user = db.prepare("SELECT username, password, lat, lng FROM users WHERE username = ?").get(username) as any;
+    if (!user) {
+      return res.status(401).json({ error: "Username tidak ditemukan" });
+    }
+    if (user.password !== password) {
+      return res.status(401).json({ error: "Password salah" });
+    }
+    res.json({ user: { username: user.username, lat: user.lat, lng: user.lng } });
+  });
+
+  // 5. Disease Reports
+  app.get("/api/reports", (req, res) => {
+    const reports = db.prepare("SELECT * FROM reports ORDER BY date DESC").all();
+    res.json(reports);
+  });
+
+  app.post("/api/reports", (req, res) => {
+    const { farmerName, diseaseName, lat, lng, date } = req.body;
+    if (!farmerName || !diseaseName || typeof lat !== "number" || typeof lng !== "number" || !date) {
+      return res.status(400).json({ error: "Data laporan tidak lengkap" });
+    }
+    const stmt = db.prepare("INSERT INTO reports (farmerName, diseaseName, lat, lng, date) VALUES (?, ?, ?, ?, ?)");
+    const info = stmt.run(farmerName, diseaseName, lat, lng, date);
     res.json({ id: info.lastInsertRowid });
   });
 
