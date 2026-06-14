@@ -16,7 +16,8 @@ import {
   Map as MapIcon,
   MapPin,
   Trash2,
-  Upload
+  Upload,
+  Lock
 } from 'lucide-react';
 import Webcam from 'react-webcam';
 import axios from 'axios';
@@ -66,6 +67,7 @@ interface Schedule {
   lat?: number;
   lng?: number;
   polygon?: string;
+  isPrivate?: number;
 }
 
 interface User {
@@ -555,14 +557,14 @@ const IrrigationFeature = () => {
   );
 };
 
-const MapFeature = () => {
+const MapFeature = ({ currentUser }: { currentUser: User }) => {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [reports, setReports] = useState<DiseaseReport[]>([]);
 
   useEffect(() => {
-    axios.get('/api/schedules').then(res => setSchedules(res.data)).catch(console.error);
+    axios.get('/api/schedules', { params: { username: currentUser.username } }).then(res => setSchedules(res.data)).catch(console.error);
     axios.get('/api/reports').then(res => setReports(res.data)).catch(console.error);
-  }, []);
+  }, [currentUser.username]);
 
   return (
     <div className="relative h-[calc(100vh-80px)] w-full">
@@ -588,14 +590,26 @@ const MapFeature = () => {
             }
           } catch(e){}
 
+          const isPrivate = s.isPrivate === 1;
+
           return (
             <Fragment key={`sched-${s.id}`}>
               {poly && poly.length > 0 ? (
-                <Polygon positions={poly} color="#10b981" fillColor="#10b981" fillOpacity={0.4}>
+                <Polygon 
+                  positions={poly} 
+                  color={isPrivate ? "#78716c" : "#10b981"} 
+                  fillColor={isPrivate ? "#78716c" : "#10b981"} 
+                  fillOpacity={isPrivate ? 0.5 : 0.4}
+                >
                   <Popup>
                     <div className="p-1">
-                      <h3 className="font-bold text-base mb-1">{s.farmerName}</h3>
-                      <div className="text-sm text-stone-600 mb-2">{s.variety} • {s.areaSize} Ha</div>
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <h3 className="font-bold text-base">{s.farmerName}</h3>
+                        {isPrivate && <Lock size={14} className="text-stone-500" />}
+                      </div>
+                      <div className="text-sm text-stone-600 mb-2">
+                        {s.variety} • {s.areaSize} Ha {isPrivate && <span className="text-stone-500 font-semibold">(Private)</span>}
+                      </div>
                       <div className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-xs font-medium">
                         Panen: {format(parseISO(s.harvestDate), 'dd MMM yyyy')}
                       </div>
@@ -607,8 +621,13 @@ const MapFeature = () => {
                   <Marker position={[s.lat, s.lng]}>
                     <Popup>
                       <div className="p-1">
-                        <h3 className="font-bold text-base mb-1">{s.farmerName}</h3>
-                        <div className="text-sm text-stone-600 mb-2">{s.variety} • {s.areaSize} Ha</div>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <h3 className="font-bold text-base">{s.farmerName}</h3>
+                          {isPrivate && <Lock size={14} className="text-stone-500" />}
+                        </div>
+                        <div className="text-sm text-stone-600 mb-2">
+                          {s.variety} • {s.areaSize} Ha {isPrivate && <span className="text-stone-500 font-semibold">(Private)</span>}
+                        </div>
                         <div className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-xs font-medium">
                           Panen: {format(parseISO(s.harvestDate), 'dd MMM yyyy')}
                         </div>
@@ -699,12 +718,13 @@ const CommunityFeature = ({ currentUser }: { currentUser: User }) => {
     lat: currentUser.lat,
     lng: currentUser.lng,
     polygon: [] as [number, number][],
-    drawingPolygon: false
+    drawingPolygon: false,
+    isPrivate: false
   });
 
   const fetchData = async () => {
     try {
-      const schedRes = await axios.get('/api/schedules');
+      const schedRes = await axios.get('/api/schedules', { params: { username: currentUser.username } });
       setSchedules(schedRes.data);
     } catch (e) {
       console.error(e);
@@ -721,6 +741,18 @@ const CommunityFeature = ({ currentUser }: { currentUser: User }) => {
     const harvestDate = format(addDays(parseISO(formData.plantingDate), 115), 'yyyy-MM-dd');
     await axios.post('/api/schedules', { ...formData, harvestDate });
     setShowForm(false);
+    // Reset form data including privacy setting
+    setFormData({
+      farmerName: currentUser.username,
+      variety: 'Ciherang',
+      plantingDate: format(new Date(), 'yyyy-MM-dd'),
+      areaSize: 1,
+      lat: currentUser.lat,
+      lng: currentUser.lng,
+      polygon: [] as [number, number][],
+      drawingPolygon: false,
+      isPrivate: false
+    });
     fetchData();
   };
 
@@ -750,8 +782,13 @@ const CommunityFeature = ({ currentUser }: { currentUser: User }) => {
         {schedules.map((s) => (
           <div key={s.id} className="bg-white p-4 rounded-xl shadow-sm border border-stone-100 flex justify-between items-center">
             <div>
-              <h3 className="font-bold text-stone-900">{s.farmerName}</h3>
-              <p className="text-xs text-stone-500">{s.variety} • {s.areaSize} Ha</p>
+              <div className="flex items-center gap-1.5">
+                <h3 className="font-bold text-stone-900">{s.farmerName}</h3>
+                {s.isPrivate === 1 && <Lock size={14} className="text-stone-400" />}
+              </div>
+              <p className="text-xs text-stone-500">
+                {s.variety} • {s.areaSize} Ha {s.isPrivate === 1 && <span className="text-stone-400 font-medium ml-1">(Private)</span>}
+              </p>
             </div>
             <div className="text-right">
               <div className="text-xs text-stone-400">Panen</div>
@@ -883,6 +920,18 @@ const CommunityFeature = ({ currentUser }: { currentUser: User }) => {
                     onChange={e => setFormData({...formData, plantingDate: e.target.value})}
                   />
                 </div>
+                <div className="flex items-center gap-2 py-1">
+                  <input 
+                    type="checkbox" 
+                    id="isPrivate" 
+                    className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-stone-300"
+                    checked={formData.isPrivate}
+                    onChange={e => setFormData({...formData, isPrivate: e.target.checked})}
+                  />
+                  <label htmlFor="isPrivate" className="text-sm font-medium text-stone-700 cursor-pointer select-none">
+                    Jadikan lahan ini private (hanya Anda yang dapat melihat)
+                  </label>
+                </div>
                 <button type="submit" className="w-full bg-stone-900 text-white py-3 rounded-xl font-medium">
                   Simpan
                 </button>
@@ -921,7 +970,7 @@ export default function App() {
       <main>
         {activeTab === 'detect' && <DetectionFeature currentUser={currentUser} onLogout={handleLogout} />}
         {activeTab === 'irrigation' && <IrrigationFeature />}
-        {activeTab === 'map' && <MapFeature />}
+        {activeTab === 'map' && <MapFeature currentUser={currentUser} />}
         {activeTab === 'community' && <CommunityFeature currentUser={currentUser} />}
       </main>
       <Navigation activeTab={activeTab} setTab={setActiveTab} />
