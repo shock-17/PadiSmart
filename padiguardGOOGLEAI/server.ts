@@ -22,7 +22,7 @@ const RICE_API_URL = process.env.RICE_API_URL || "http://localhost:8000";
 
 // --- Input validation helpers ---
 function validateSchedule(body: any): string | null {
-  const { farmerName, variety, plantingDate, harvestDate, areaSize, lat, lng } = body;
+  const { farmerName, variety, plantingDate, harvestDate, areaSize, lat, lng, isPrivate } = body;
   if (!farmerName || typeof farmerName !== "string" || farmerName.length > 200)
     return "farmerName is required (string, max 200 chars)";
   if (!variety || typeof variety !== "string")
@@ -37,6 +37,8 @@ function validateSchedule(body: any): string | null {
     return "lat must be a number between -90 and 90";
   if (lng !== undefined && (typeof lng !== "number" || lng < -180 || lng > 180))
     return "lng must be a number between -180 and 180";
+  if (isPrivate !== undefined && typeof isPrivate !== "boolean" && isPrivate !== 0 && isPrivate !== 1)
+    return "isPrivate must be a boolean or 0/1";
   return null;
 }
 
@@ -65,7 +67,8 @@ db.exec(`
     harvestDate TEXT NOT NULL,
     areaSize REAL,
     lat REAL,
-    lng REAL
+    lng REAL,
+    isPrivate INTEGER DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS bookings (
@@ -97,12 +100,18 @@ db.exec(`
 // Migration to add lat/lng if the table was created before
 try {
   db.exec('ALTER TABLE schedules ADD COLUMN lat REAL');
+} catch (e: any) {
+  if (!e.message?.includes("duplicate column name")) throw e;
+}
+try {
   db.exec('ALTER TABLE schedules ADD COLUMN lng REAL');
 } catch (e: any) {
-  // Only swallow "duplicate column" errors; re-throw anything unexpected
-  if (!e.message?.includes("duplicate column name")) {
-    throw e;
-  }
+  if (!e.message?.includes("duplicate column name")) throw e;
+}
+try {
+  db.exec('ALTER TABLE schedules ADD COLUMN isPrivate INTEGER DEFAULT 0');
+} catch (e: any) {
+  if (!e.message?.includes("duplicate column name")) throw e;
 }
 
 async function startServer() {
@@ -217,8 +226,13 @@ async function startServer() {
 
   // 2. Community Schedules
   app.get("/api/schedules", (req, res) => {
-    const stmt = db.prepare("SELECT * FROM schedules ORDER BY plantingDate DESC");
-    const schedules = stmt.all();
+    const username = req.query.username;
+    const stmt = db.prepare(`
+      SELECT * FROM schedules 
+      WHERE isPrivate = 0 OR farmerName = ? 
+      ORDER BY plantingDate DESC
+    `);
+    const schedules = stmt.all(username || "");
     res.json(schedules);
   });
 
@@ -226,12 +240,13 @@ async function startServer() {
     const validationError = validateSchedule(req.body);
     if (validationError) return res.status(400).json({ error: validationError });
 
-    const { farmerName, variety, plantingDate, harvestDate, areaSize, lat, lng } = req.body;
+    const { farmerName, variety, plantingDate, harvestDate, areaSize, lat, lng, isPrivate } = req.body;
     const stmt = db.prepare(`
-      INSERT INTO schedules (farmerName, variety, plantingDate, harvestDate, areaSize, lat, lng)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO schedules (farmerName, variety, plantingDate, harvestDate, areaSize, lat, lng, isPrivate)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    const info = stmt.run(farmerName, variety, plantingDate, harvestDate, areaSize ?? null, lat ?? null, lng ?? null);
+    const isPrivateInt = isPrivate ? 1 : 0;
+    const info = stmt.run(farmerName, variety, plantingDate, harvestDate, areaSize ?? null, lat ?? null, lng ?? null, isPrivateInt);
     res.json({ id: info.lastInsertRowid });
   });
 
